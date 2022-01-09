@@ -187,7 +187,7 @@ func main() {
 
 	fmt.Println("LWA Access Token", auth.Access_token)
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < len(metrics); i++ {
 		metricResponse := MetricsResponse{}
 		getSkillMetric(skillID, metrics[i], auth.Access_token, &metricResponse)
 
