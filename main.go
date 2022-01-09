@@ -9,12 +9,23 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	chart "github.com/wcharczuk/go-chart/v2"
 )
 
 var httpClient = &http.Client{Timeout: 200 * time.Second}
 
-const uniqueCustomers = "uniqueCustomers"
-const dateTimeFormat = "2021-12-12T00:00:00Z"
+var metrics = [...]string{
+	"uniqueCustomers",
+	"totalEnablements",
+	"totalEnablements",
+	"successfulUtterances",
+	"failedUtterances",
+	"totalSessions",
+	"successfulSessions",
+	"incompleteSessions",
+	"userEndedSessions",
+	"skillEndedSessions"}
 
 func lwaOAuthURL() string {
 	return "https://api.amazon.com/auth/o2/token"
@@ -77,8 +88,6 @@ func getSkillMetric(skillID string, metric string, accessToken string, target in
 	endTime := time.Now()
 	startTime := endTime.AddDate(0, 0, -7)
 
-	fmt.Println(formatTimeDate(startTime), formatTimeDate(endTime))
-
 	url := metricsSMAPIURL(skillID, formatTimeDate(startTime), formatTimeDate(endTime), metric)
 
 	var bodyString = ""
@@ -106,6 +115,39 @@ func getSkillMetric(skillID string, metric string, accessToken string, target in
 	return json.Unmarshal(responseData, &target)
 }
 
+func generateMetricChart(deployDir string, metricResponse MetricsResponse) {
+	series := make([]chart.Series, 1)
+	count := len(metricResponse.Values)
+	xValues := make([]time.Time, count)
+	for i := 0; i < count; i++ {
+		xValues[i], _ = time.Parse(time.RFC3339, metricResponse.Timestamps[i])
+	}
+
+	series[0] = chart.TimeSeries{
+		Name:    metricResponse.Metric,
+		XValues: xValues,
+		YValues: metricResponse.Values,
+	}
+
+	graph := chart.Chart{
+		Background: chart.Style{
+			Padding: chart.NewBox(20, 20, 20, 20),
+		},
+		XAxis: chart.XAxis{
+			Name: "Time",
+		},
+		YAxis: chart.YAxis{
+			Name: "Value",
+		},
+		Series: series,
+	}
+	filepath := deployDir + "/" + metricResponse.Metric + ".png"
+	f, _ := os.Create(filepath)
+	defer f.Close()
+	graph.Render(chart.PNG, f)
+	fmt.Println(filepath)
+}
+
 func main() {
 	fmt.Println("Get the LWA access token")
 
@@ -113,6 +155,7 @@ func main() {
 	lwaClientSecret := getenv("lwa_client_secret", "")
 	lwaRefreshToken := getenv("lwa_refresh_token", "")
 	skillID := getenv("custom_skill_id", "")
+	deployDir := getenv("BITRISE_DEPLOY_DIR", "")
 
 	if lwaClientID == "" {
 		fmt.Println("LWA Client ID is required")
@@ -134,16 +177,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	if deployDir == "" {
+		fmt.Println("Deploy directory not found")
+		os.Exit(1)
+	}
+
 	auth := AuthenticateResponse{}
 	getLWAAccessToken(lwaClientID, lwaClientSecret, lwaRefreshToken, &auth)
 
 	fmt.Println("LWA Access Token", auth.Access_token)
-	uniqueCustomersResponse := MetricsResponse{}
-	getSkillMetric(skillID, uniqueCustomers, auth.Access_token, &uniqueCustomersResponse)
 
-	fmt.Println("Number of unique customers on each day last week", uniqueCustomersResponse.Metric)
-	for i := 0; i < len(uniqueCustomersResponse.Values); i++ {
-		fmt.Println(uniqueCustomersResponse.Values[i])
+	for i := 0; i < 1; i++ {
+		metricResponse := MetricsResponse{}
+		getSkillMetric(skillID, metrics[i], auth.Access_token, &metricResponse)
+
+		fmt.Println("Number of " + metricResponse.Metric + " on each day last week")
+		for i := 0; i < len(metricResponse.Values); i++ {
+			fmt.Println(metricResponse.Timestamps[i], metricResponse.Values[i])
+		}
+
+		generateMetricChart(deployDir, metricResponse)
+
 	}
 
 	os.Exit(0)
